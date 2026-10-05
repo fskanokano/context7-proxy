@@ -38,13 +38,20 @@ export function normalizePath(pathname: string): string {
   return pathname;
 }
 
-/** 是否为自带探活路径:全路径、别名与网关剥离前缀后的 `/health` 均接受。 */
+/** 是否为自带探活路径:全路径、别名、剥离前缀后的 `/health` 均接受。
+ *
+ * 兼容逻辑:完全相等优先;否则以后缀 `/health` 兜底(覆盖网关可能追加
+ * 部署前缀、版本前缀等未知形态)。`/health` 绝不会是正常 MCP 流量,
+ * 上游也不存在该端点(直调返回 404 not_found),因此后缀兜底安全。 */
 export function isHealthPath(pathname: string): boolean {
-  return (
+  if (
     pathname === HEALTH_PATH ||
     pathname === HEALTH_PATH_ALIAS ||
     pathname === "/health"
-  );
+  ) {
+    return true;
+  }
+  return pathname.endsWith("/health");
 }
 
 /** 与 Context7 线上实测完全一致的 CORS 响应头。 */

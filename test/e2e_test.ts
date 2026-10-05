@@ -511,6 +511,11 @@ Deno.test({
         "全路径根映射",
       );
       assertEquals(mapPathToUpstream("/health"), "/mcp", "探活路径不转发上游");
+      assertEquals(
+        mapPathToUpstream("/v1/functions/context7-proxy/health"),
+        "/mcp",
+        "未知网关前缀后缀兜底",
+      );
     });
 
     // -------------------------------------------------------------------------
