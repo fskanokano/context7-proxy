@@ -1,5 +1,5 @@
 // =============================================================================
-// Supabase Edge Function 入口(mcp)
+// Supabase Edge Function 入口(context7-proxy)
 // =============================================================================
 //
 // 形态与官方最新模板一致(`export default { fetch }`),由 Supabase Edge Runtime 调用。

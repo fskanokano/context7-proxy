@@ -3,7 +3,7 @@
 // =============================================================================
 //
 // 模拟内容:
-//   1. Edge Runtime 加载生产入口 supabase/functions/mcp/index.ts(export default { fetch });
+//   1. Edge Runtime 加载生产入口 supabase/functions/context7-proxy/index.ts(export default { fetch });
 //   2. secret 由测试显式注入(PROXY_API_KEY / CONTEXT7_API_KEY);
 //   3. 可选:把发往 https://mcp.context7.com 的出站请求重定向到本地假上游
 //      (FAKE_UPSTREAM_BASE,形如 http://127.0.0.1:9000);未设置时直连真实上游。
@@ -37,7 +37,7 @@ if (upstreamBase) {
 }
 
 // 加载生产入口(与部署到 Supabase 时完全相同的文件)
-const worker = (await import("../supabase/functions/mcp/index.ts")).default;
+const worker = (await import("../supabase/functions/context7-proxy/index.ts")).default;
 
 Deno.serve(
   {

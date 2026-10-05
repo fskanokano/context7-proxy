@@ -13,7 +13,15 @@
 //   - 本测试只读取该环境变量的“是否存在”,从不打印其值。
 
 import { assert, assertEquals, assertStringIncludes } from "./asserts.ts";
-import { asRecord, freePort, mcpPost, type NodeHandle, startNode, stopNodes } from "./harness.ts";
+import {
+  asRecord,
+  freePort,
+  mcpEndpoint,
+  mcpPost,
+  type NodeHandle,
+  startNode,
+  stopNodes,
+} from "./harness.ts";
 
 const LIVE_PROXY_KEY = "ctx7-proxy-live-test-key-0002";
 const UPSTREAM_ENDPOINT = "https://mcp.context7.com/mcp";
@@ -169,6 +177,47 @@ Deno.test({
     await t.step("⑦ 访问控制:本代理要求 PROXY_API_KEY(与直连上游的差异)", async () => {
       const noKey = await mcpPost(nodes[0].port, initPayload(9));
       assertEquals(noKey.res.status, 401, "无凭据必须 401");
+    });
+
+    await t.step("⑧ 自带探活 GET /health:带凭据 200 + ok(不耗上游配额)", async () => {
+      const ok = await fetch(mcpEndpoint(nodes[0].port) + "/health", {
+        method: "GET",
+        headers: AUTH,
+      });
+      assertEquals(ok.status, 200, "探活状态码");
+      const body = await ok.text();
+      assertStringIncludes(body, '"ok":true', "探活响应体");
+      assertStringIncludes(body, "context7-proxy", "探活服务名");
+
+      const anon = await fetch(mcpEndpoint(nodes[0].port) + "/health", {
+        method: "GET",
+      });
+      assertEquals(anon.status, 401, "无凭据探活必须 401");
+      await anon.text();
+    });
+
+    await t.step("⑨ 上游密钥有效性:直调官方 REST 接口(401=无效,200=有效)", async () => {
+      // MCP 透传无法区分上游密钥真假(initialize 对匿名也 200),因此用官方
+      // REST 接口 `GET /api/v2/libs/search` 验证:有效=200,无效=401 invalid_api_key。
+      // 详见 README“探活与密钥验证”一节。
+      const res = await fetch(
+        "https://context7.com/api/v2/libs/search?libraryName=react&query=state",
+        {
+          method: "GET",
+          headers: { authorization: `Bearer ${UPSTREAM_KEY}` },
+          signal: AbortSignal.timeout(60_000),
+        },
+      );
+      const text = await res.text();
+      if (HAS_REAL_KEY) {
+        assertEquals(res.status, 200, "真实上游密钥应有效(200)");
+      } else {
+        assert(
+          res.status === 200 || res.status === 401,
+          `占位密钥只允许 200(匿名)或 401(无效),实际 ${res.status}: ${text.slice(0, 200)}`,
+        );
+        console.log(`占位密钥 REST 验证结果:HTTP=${res.status}(详见响应体,值已脱敏)`);
+      }
     });
   } finally {
     await stopNodes(nodes);

@@ -4,7 +4,7 @@
     "test:live": "deno test -A --no-check test/live_test.ts",
     "test:live:ps": "powershell -NoProfile -ExecutionPolicy Bypass -File test/run_live.ps1",
     "serve:fake": "deno run -A test/fake_node.ts 18080",
-    "check": "deno check supabase/functions/mcp/index.ts test/e2e_test.ts test/live_test.ts",
+    "check": "deno check supabase/functions/context7-proxy/index.ts test/e2e_test.ts test/live_test.ts",
     "fmt": "deno fmt supabase/functions test *.json",
     "lint": "deno lint supabase/functions test"
   },

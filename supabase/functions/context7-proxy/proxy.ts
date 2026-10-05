@@ -17,10 +17,20 @@
 export const UPSTREAM_ORIGIN = "https://mcp.context7.com";
 
 /** Supabase Edge Functions 网关为函数分配的挂载路径。 */
-export const FUNCTION_MOUNT_PATH = "/functions/v1/mcp";
+export const FUNCTION_MOUNT_PATH = "/functions/v1/context7-proxy";
 
 /** Context7 的 MCP 端点路径。 */
 export const UPSTREAM_PATH = "/mcp";
+
+/** 本代理自带的探活端点(挂载路径 + `/health`,无需转发上游)。
+ *
+ * 用途:部署后用 `GET <mount>/health` 一次确认“函数已上线 + PROXY_API_KEY 正确 +
+ * CONTEXT7_API_KEY 已配置”,响应为固定 JSON,不消耗上游配额。
+ * 上游密钥的“有效性”(是否被 Context7 接受)仍需直调官方 REST 接口验证,见 README。 */
+export const HEALTH_PATH = FUNCTION_MOUNT_PATH + "/health";
+
+/** 自定义域名场景下的探活路径(直挂 `/mcp` 时的 `/mcp/health`)。 */
+export const HEALTH_PATH_ALIAS = UPSTREAM_PATH + "/health";
 
 /** 与 Context7 线上实测完全一致的 CORS 响应头。 */
 export const CORS_HEADERS: Readonly<Record<string, string>> = {
@@ -131,7 +141,27 @@ export function createHandler(
     }
 
     // -------------------------------------------------------------------------
-    // 3) 读取上游凭据(CONTEXT7_API_KEY)
+    // 3) 自带探活:GET <mount>/health(需 PROXY_API_KEY,不转发上游,不耗配额)
+    // -------------------------------------------------------------------------
+    if (
+      req.method === "GET" &&
+      (requestUrl.pathname === HEALTH_PATH ||
+        requestUrl.pathname === HEALTH_PATH_ALIAS)
+    ) {
+      const context7ApiKey = config.getContext7ApiKey();
+      if (!context7ApiKey) {
+        return respond(
+          jsonRpcServiceError(
+            500,
+            "Server configuration error: upstream key is not configured.",
+          ),
+        );
+      }
+      return respond(healthResponse());
+    }
+
+    // -------------------------------------------------------------------------
+    // 4) 读取上游凭据(CONTEXT7_API_KEY)
     // -------------------------------------------------------------------------
     const context7ApiKey = config.getContext7ApiKey();
     if (!context7ApiKey) {
@@ -144,7 +174,7 @@ export function createHandler(
     }
 
     // -------------------------------------------------------------------------
-    // 4) 组装上游请求:除凭据外一切透传
+    // 5) 组装上游请求:除凭据外一切透传
     // -------------------------------------------------------------------------
     const upstreamUrl = buildUpstreamUrl(requestUrl);
     const upstreamHeaders = buildUpstreamHeaders(req.headers, context7ApiKey);
@@ -172,7 +202,7 @@ export function createHandler(
     }
 
     // -------------------------------------------------------------------------
-    // 5) 透传响应:状态码、响应头、流式响应体(SSE 不缓冲)
+    // 6) 透传响应:状态码、响应头、流式响应体(SSE 不缓冲)
     // -------------------------------------------------------------------------
     const responseHeaders = new Headers();
     for (const [name, value] of upstreamResponse.headers) {
@@ -253,11 +283,14 @@ export function timingSafeEqual(a: string, b: string): boolean {
 // 上游 URL 与请求头
 // -----------------------------------------------------------------------------
 
-/** 把网关挂载路径映射为上游 Context7 的端点路径。 */
+/** 把网关挂载路径映射为上游 Context7 的端点路径。
+ *
+ * 注意:探活路径(HEALTH_PATH / HEALTH_PATH_ALIAS)在处理器中优先拦截,
+ * 永远不会走到这里被转发给上游。 */
 export function mapPathToUpstream(pathname: string): string {
   if (pathname === FUNCTION_MOUNT_PATH) return UPSTREAM_PATH;
   if (pathname.startsWith(FUNCTION_MOUNT_PATH + "/")) {
-    // 保留子路径(例如 /functions/v1/mcp/oauth -> /mcp/oauth),保证透传语义
+    // 保留子路径(例如 /functions/v1/context7-proxy/oauth -> /mcp/oauth),保证透传语义
     return UPSTREAM_PATH + pathname.slice(FUNCTION_MOUNT_PATH.length);
   }
   // 允许自定义域/重写场景直接以 /mcp 形式访问
@@ -310,6 +343,17 @@ export function unauthorizedResponse(): Response {
         "www-authenticate": "Bearer",
         ...CORS_HEADERS,
       },
+    },
+  );
+}
+
+/** 探活成功:函数已上线 + 双密钥均已配置(固定 JSON,不含任何密钥)。 */
+export function healthResponse(): Response {
+  return new Response(
+    JSON.stringify({ ok: true, service: "context7-proxy" }),
+    {
+      status: 200,
+      headers: { "content-type": "application/json", ...CORS_HEADERS },
     },
   );
 }

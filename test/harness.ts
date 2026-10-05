@@ -95,7 +95,7 @@ function redact(line: string): string {
 }
 
 export function mcpEndpoint(port: number, search = ""): string {
-  return `http://127.0.0.1:${port}/functions/v1/mcp${search}`;
+  return `http://127.0.0.1:${port}/functions/v1/context7-proxy${search}`;
 }
 
 export interface McpResponse {

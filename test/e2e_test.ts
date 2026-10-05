@@ -12,7 +12,7 @@
 //
 // 覆盖:凭据认证、全参数透传、SSE 流式不缓冲、大响应、gzip、错误透传、
 //       方法语义(GET/DELETE 405)、CORS 预检、多节点分布式、并发、故障迁移、
-//       配置缺失(500)、密钥不泄漏。
+//       自带探活(GET /health)、配置缺失(500)、密钥不泄漏。
 
 import { assert, assertEquals, assertStringIncludes } from "./asserts.ts";
 import type { RecordedRequest } from "./fake_upstream.ts";
@@ -450,7 +450,29 @@ Deno.test({
     });
 
     // -------------------------------------------------------------------------
-    await t.step("⑳ 安全汇总:上游收到的全部请求中均无访问密钥", () => {
+    await t.step("⑳ 自带探活 GET /health:带凭据 200 + ok,不触达上游", async () => {
+      const before = upstream.requests.length;
+      assert(before > 0, "探活前上游应已收到过请求");
+      const ok = await fetch(mcpEndpoint(nodes[0].port) + "/health", {
+        method: "GET",
+        headers: AUTH,
+      });
+      assertEquals(ok.status, 200, "探活状态码");
+      const body = await ok.text();
+      assertStringIncludes(body, '"ok":true', "探活响应体");
+      assertStringIncludes(body, "context7-proxy", "探活服务名");
+      assertEquals(upstream.requests.length, before, "探活不得触达上游");
+
+      const anon = await fetch(mcpEndpoint(nodes[0].port) + "/health", {
+        method: "GET",
+      });
+      assertEquals(anon.status, 401, "无凭据探活必须 401");
+      await anon.text();
+      assertEquals(upstream.requests.length, before, "未授权探活不得触达上游");
+    });
+
+    // -------------------------------------------------------------------------
+    await t.step("㉑ 安全汇总:上游收到的全部请求中均无访问密钥", () => {
       assert(upstream.requests.length > 0, "上游应收到过请求");
       for (const record of upstream.requests) {
         assert(
