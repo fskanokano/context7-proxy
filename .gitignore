@@ -1,0 +1,16 @@
+# 环境变量文件:绝不提交任何密钥
+.env
+.env.*
+supabase/functions/.env
+supabase/functions/.env.*
+
+# Supabase CLI 本地状态
+supabase/.branches/
+supabase/.temp/
+
+# 依赖与日志
+node_modules/
+*.log
+
+# Agent 工作目录
+.freebuff/
