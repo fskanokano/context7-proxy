@@ -472,6 +472,48 @@ Deno.test({
     });
 
     // -------------------------------------------------------------------------
+    await t.step("⑳之一 路径兼容:剥离前缀/尾斜杠形态同样识别探活与透传", async () => {
+      // 直接调用生产 handler(不经假节点 HTTP 层),模拟 Edge Runtime 已剥离函数前缀的形态。
+      const { createHandler } = await import("../supabase/functions/context7-proxy/proxy.ts");
+      const handler = createHandler({
+        getProxyApiKey: () => TEST_PROXY_KEY,
+        getContext7ApiKey: () => TEST_UPSTREAM_KEY,
+      });
+      const withAuth = { authorization: `Bearer ${TEST_PROXY_KEY}` };
+
+      // 剥离前缀后的 /health 应直接 200(不触达上游)。
+      const before = upstream.requests.length;
+      const stripped = await handler(
+        new Request("http://localhost/health", { method: "GET", headers: withAuth }),
+      );
+      assertEquals(stripped.status, 200, "剥离前缀 /health 应 200");
+      assertStringIncludes(await stripped.text(), '"ok":true', "剥离前缀探活响应体");
+      assertEquals(upstream.requests.length, before, "剥离前缀探活不得触达上游");
+
+      // 尾斜杠形态同样识别。
+      const trailing = await handler(
+        new Request("http://localhost/functions/v1/context7-proxy/health/", {
+          method: "GET",
+          headers: withAuth,
+        }),
+      );
+      assertEquals(trailing.status, 200, "尾斜杠探活应 200");
+      await trailing.text();
+
+      // 路径映射:剥离前缀的根路径应落到上游 /mcp(透传语义不变)。
+      const { mapPathToUpstream } = await import(
+        "../supabase/functions/context7-proxy/proxy.ts"
+      );
+      assertEquals(mapPathToUpstream("/"), "/mcp", "剥离前缀根路径映射");
+      assertEquals(
+        mapPathToUpstream("/functions/v1/context7-proxy"),
+        "/mcp",
+        "全路径根映射",
+      );
+      assertEquals(mapPathToUpstream("/health"), "/mcp", "探活路径不转发上游");
+    });
+
+    // -------------------------------------------------------------------------
     await t.step("㉑ 安全汇总:上游收到的全部请求中均无访问密钥", () => {
       assert(upstream.requests.length > 0, "上游应收到过请求");
       for (const record of upstream.requests) {

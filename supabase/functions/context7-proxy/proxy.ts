@@ -32,6 +32,21 @@ export const HEALTH_PATH = FUNCTION_MOUNT_PATH + "/health";
 /** 自定义域名场景下的探活路径(直挂 `/mcp` 时的 `/mcp/health`)。 */
 export const HEALTH_PATH_ALIAS = UPSTREAM_PATH + "/health";
 
+/** 归一化路径:去掉尾部多余斜杠(根路径 `/` 除外)。 */
+export function normalizePath(pathname: string): string {
+  if (pathname.length > 1) return pathname.replace(/\/+$/, "");
+  return pathname;
+}
+
+/** 是否为自带探活路径:全路径、别名与网关剥离前缀后的 `/health` 均接受。 */
+export function isHealthPath(pathname: string): boolean {
+  return (
+    pathname === HEALTH_PATH ||
+    pathname === HEALTH_PATH_ALIAS ||
+    pathname === "/health"
+  );
+}
+
 /** 与 Context7 线上实测完全一致的 CORS 响应头。 */
 export const CORS_HEADERS: Readonly<Record<string, string>> = {
   "access-control-allow-origin": "*",
@@ -142,12 +157,11 @@ export function createHandler(
 
     // -------------------------------------------------------------------------
     // 3) 自带探活:GET <mount>/health(需 PROXY_API_KEY,不转发上游,不耗配额)
+    //
+    // 注意:Edge Runtime 传给函数的 req.url pathname 形态不固定(全路径网关挂载
+    // 或已剥离函数前缀),因此这里用归一化 + 多形态兼容判断,禁止只比对全路径。
     // -------------------------------------------------------------------------
-    if (
-      req.method === "GET" &&
-      (requestUrl.pathname === HEALTH_PATH ||
-        requestUrl.pathname === HEALTH_PATH_ALIAS)
-    ) {
+    if (req.method === "GET" && isHealthPath(normalizePath(requestUrl.pathname))) {
       const context7ApiKey = config.getContext7ApiKey();
       if (!context7ApiKey) {
         return respond(
@@ -285,18 +299,22 @@ export function timingSafeEqual(a: string, b: string): boolean {
 
 /** 把网关挂载路径映射为上游 Context7 的端点路径。
  *
- * 注意:探活路径(HEALTH_PATH / HEALTH_PATH_ALIAS)在处理器中优先拦截,
- * 永远不会走到这里被转发给上游。 */
+ * 注意:探活路径(isHealthPath)在处理器中优先拦截,永远不会走到这里被转发给上游。
+ * Edge Runtime 可能已剥离函数前缀(此时 pathname 为 `/` 或 `/health`),同样做归一化兼容。 */
 export function mapPathToUpstream(pathname: string): string {
-  if (pathname === FUNCTION_MOUNT_PATH) return UPSTREAM_PATH;
-  if (pathname.startsWith(FUNCTION_MOUNT_PATH + "/")) {
+  const normalized = normalizePath(pathname);
+  if (isHealthPath(normalized)) return UPSTREAM_PATH;
+  if (normalized === FUNCTION_MOUNT_PATH) return UPSTREAM_PATH;
+  if (normalized.startsWith(FUNCTION_MOUNT_PATH + "/")) {
     // 保留子路径(例如 /functions/v1/context7-proxy/oauth -> /mcp/oauth),保证透传语义
-    return UPSTREAM_PATH + pathname.slice(FUNCTION_MOUNT_PATH.length);
+    return UPSTREAM_PATH + normalized.slice(FUNCTION_MOUNT_PATH.length);
   }
   // 允许自定义域/重写场景直接以 /mcp 形式访问
-  if (pathname === UPSTREAM_PATH || pathname.startsWith(UPSTREAM_PATH + "/")) {
-    return pathname;
+  if (normalized === UPSTREAM_PATH || normalized.startsWith(UPSTREAM_PATH + "/")) {
+    return normalized;
   }
+  // 已剥离前缀的根路径(/)与未知路径一律落到上游 /mcp
+  if (normalized === "/") return UPSTREAM_PATH;
   return UPSTREAM_PATH;
 }
 
