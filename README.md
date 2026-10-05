@@ -43,6 +43,33 @@ MCP 客户端 ──(Authorization: Bearer <PROXY_API_KEY>)──▶ 本代理 �
 
 除此之外,请求与响应的一切(方法、子路径、查询参数、请求头、请求体、状态码、响应头、响应体、SSE 分块节奏)均原样透传。
 
+### 传输协议细节(实测)
+
+Context7 的 `/mcp` 采用 MCP 规范的 **Streamable HTTP** 传输:**单一端点 + POST**,请求是普通 JSON-RPC,响应**必须**用 SSE 帧封装(`text/event-stream`)。它**不是**传统的“一次请求一次 JSON 响应”,也**不是**老式的 HTTP+SSE 传输(那种需要 `GET /sse` 另开一条上行流)。
+
+匿名探测上游得到的事实(不使用任何密钥):
+
+| 观察点               | 实测结果                                                                                       |
+| -------------------- | ---------------------------------------------------------------------------------------------- |
+| 正常 `POST` 响应头  | `200`、`content-type: text/event-stream`、`cache-control: no-cache, no-transform`、`x-accel-buffering: no` |
+| 响应体格式           | `event: message\ndata: {"jsonrpc":...}`                                                        |
+| 仅 `Accept: application/json`     | `406`,`Not Acceptable: Client must accept both ...`(取不到纯 JSON 响应)         |
+| 仅 `Accept: text/event-stream`   | `406`,同上 → **客户端必须同时声明两种类型**                                     |
+| `GET` / `DELETE`     | `405`,`Method not allowed.` → 不存在独立的上行 SSE 流                                            |
+| 通知(无 `id`)       | `202`,空响应体                                                                                  |
+
+**但服务端当前并不真的做渐进式推送**(单次实测):
+
+| 调用                                | 总耗时  | 流分块 | SSE 帧                    |
+| ----------------------------------- | ------- | ------ | ------------------------- |
+| `initialize`                        | 2111ms  | 1      | 1(最终结果)              |
+| `resolve-library-id`                | 2113ms  | 1      | 1(最终结果)              |
+| `query-docs`(1500 tokens / 6628 字节) | 2795ms | 1      | 1(最终结果,首字节≈总耗时) |
+
+即:先算完,再一次性整段下发,没有 progress 通知、没有中途分块。
+
+**对代理的硬性要求**:协议本身允许多帧渐进流(中间通知 + 最终结果),上游随时可能改成真正的流式,因此代理**不得缓冲响应体**。[supabase/functions/mcp/proxy.ts](supabase/functions/mcp/proxy.ts) 直接把 `upstreamResponse.body` 原样透传、不做任何聚合;e2e 第 ⑪ 步用假上游制造 ≥200ms 间隔的多块 SSE,专门验证这一点。
+
 ## 二、目录结构
 
 ```
